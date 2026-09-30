@@ -1,0 +1,137 @@
+# Idea Flow — production overlay
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+#   docker compose -f compose.yaml -f compose.prod.yaml ps
+#   docker compose -f compose.yaml -f compose.prod.yaml logs -f api web
+#   docker compose -f compose.yaml -f compose.prod.yaml down
+#
+# Hardening summary:
+#   - no source code on the host is mounted into the containers
+#   - only `web` publishes a port; it is the single origin and reverse-proxies
+#     /api to `api` (see infra/nginx/web.conf)
+#   - `api` runs without any linux capability and cannot gain privileges
+#   - every secret is REQUIRED (${VAR:?}) so a missing value aborts the deploy
+#     instead of silently falling back to a development default
+#   - `api` must answer GET /health for the stack to be considered ready
+#
+# Assumes .env exists next to this file. `cp .env.example .env` then edit.
+
+name: idea-flow-prod
+
+x-app: &app
+  init: true
+  networks:
+    - idea-flow
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    restart: always
+    ports:
+      # loopback only: reachable for psql/migrations, invisible from the LAN
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required in .env}
+      TZ: ${TZ:-UTC}
+      PGTZ: ${TZ:-UTC}
+    # sensible defaults; the data volume is never committed to git
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=1000
+
+  api:
+    <<: *app
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: prod
+    # pinned to an explicit image name so `image:` can be retagged to a CI
+    # produced artifact without touching this file
+    image: ${API_IMAGE:-idea-flow/api:local}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required in .env}
+      # unused in practice (web proxies /api on the same origin) but some
+      # frameworks refuse to boot with an empty value
+      CORS_ORIGIN: ${CORS_ORIGIN:-${PUBLIC_URL:-http://localhost:8080}}
+      TZ: ${TZ:-UTC}
+    env_file:
+      # same dotenv file used for interpolation, so prod secrets come from
+      # exactly one place. Override with APP_ENV_FILE in .env.prod.
+      - path: ${APP_ENV_FILE:-.env.prod}
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *logging
+
+  web:
+    <<: *app
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: prod
+      args:
+        # single origin in prod: the browser calls /api and nginx proxies it
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    image: ${WEB_IMAGE:-idea-flow/web:local}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *logging
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${POSTGRES_DATA_PATH:-./infra/postgres/data}

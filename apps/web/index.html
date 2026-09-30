@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Idea Flow — a canvas for ideas, the questions behind them and the evidence underneath."
+    />
+    <title>Idea Flow</title>
+    <script>
+      /*
+       * Choose the lamp before the first paint.
+       *
+       * These three rules are the same ones in src/lib/theme.ts, inlined
+       * because a module cannot run early enough: without this the board would
+       * paint dark, then jump to light half a second later. `data-theme="light"`
+       * on <html> is the fallback for a browser with scripting off — the white
+       * drafting board is the default surface.
+       */
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('idea-flow.theme')
+          if (saved === 'light' || saved === 'dark') {
+            document.documentElement.dataset.theme = saved
+            return
+          }
+        } catch (error) {
+          /* private mode: fall through to the default */
+        }
+        document.documentElement.dataset.theme = 'light'
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Idea Flow needs JavaScript to draw its canvas.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

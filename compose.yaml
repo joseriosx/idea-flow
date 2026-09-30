@@ -1,0 +1,73 @@
+# Idea Flow — base stack (shared by every environment)
+#
+# This file only declares what dev AND prod agree on: the database, the
+# network, the logging policy and shared anchors. Application services are
+# intentionally NOT defined here — they are environment specific and live in
+# compose.dev.yaml / compose.prod.yaml.
+#
+# Usage:
+#   dev :  docker compose -f compose.yaml -f compose.dev.yaml up -d
+#   prod:  docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# Project name, volumes and networks are scoped per environment by the overlay
+# (`name:`), so dev data never collides with prod data.
+
+name: idea-flow
+
+# --------------------------------------------------------------------------
+# Anchors
+#
+# NOTE: Compose parses every file separately, so YAML anchors do NOT cross
+# file boundaries. Each overlay re-declares the anchors it needs.
+# --------------------------------------------------------------------------
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# --------------------------------------------------------------------------
+# Services
+# --------------------------------------------------------------------------
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    stop_grace_period: 30s
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-idea_flow}
+      # checksums catch silent corruption on the data volume
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---data-checksums}
+      TZ: ${TZ:-UTC}
+      PGTZ: ${TZ:-UTC}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # only executed the first time the data volume is initialised
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -h 127.0.0.1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *logging
+    networks:
+      - idea-flow
+
+# --------------------------------------------------------------------------
+# Named volumes / networks
+# --------------------------------------------------------------------------
+volumes:
+  # scoped to the compose project, so `idea-flow-dev-*` and `idea-flow-prod-*`
+  # never share data.
+  postgres_data:
+    driver: local
+
+networks:
+  idea-flow:
+    driver: bridge

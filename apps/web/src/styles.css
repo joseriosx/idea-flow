@@ -1,0 +1,701 @@
+@import 'tailwindcss';
+
+/* ==========================================================================
+   Helvetica — the one voice everything human-readable speaks.
+
+   Two real faces, upright, so `font-weight: 700` is a genuine bold and never a
+   smeared synthetic one. `font-display: swap` keeps the board readable while
+   the files arrive; they are bundled by the build, so nothing waits on a CDN.
+
+   The oblique cuts are deliberately absent. A slanted title would be the only
+   slanted word on the board, it never survived `commit()` anyway, and a browser
+   synthesised slant smears the joins and closes the counters — so the wordmark
+   stays upright and the files stay out of the bundle.
+
+   Note the two weights and nothing between: CSS font matching sends *both* 500
+   and 600 to the nearest face at or above the target, which here is 700. Any
+   weight used in this file is therefore spelled out as 400 or 700 on purpose —
+   a stray `font-medium` would silently render bold.
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Helvetica';
+  src: url('./assets/fonts/helvetica/Helvetica.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Helvetica';
+  src: url('./assets/fonts/helvetica/Helvetica-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ==========================================================================
+   Idea Flow — design tokens
+
+   The canvas is a drafting table seen in one of two lights: at night it is
+   near-black with pale dots, by day it is paper-white with dark ones. The
+   cards never change material — warm paper pinned to the board either way —
+   and three accents, one per node kind, are the only colours allowed to be
+   loud. That restraint is what keeps a dense graph readable in both modes.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Tokens that never change
+
+   The palette of the objects themselves: the two typefaces, the paper the
+   cards are printed on, and the three kind accents. `kinds.tsx` repeats the
+   accent hexes because SVG markers do not reliably inherit custom properties
+   — keep the two lists in step.
+   -------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: 'Helvetica', 'Helvetica Neue', Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* the paper the cards are printed on */
+  --color-paper: #f4f0e7;
+  --color-paper-200: #e6e0d2;
+  --color-paper-700: #2a251d;
+  --color-paper-600: #4c4536;
+
+  /* the three kinds */
+  --color-idea: #f0873c;
+  --color-question: #8b7bf7;
+  --color-evidence: #3fbfa0;
+}
+
+/* --------------------------------------------------------------------------
+   2. Tokens that follow the theme
+
+   `inline` hands the raw value to every utility instead of a generated
+   variable, so `bg-panel` and `text-fg` resolve against whichever theme is
+   live without Tailwind needing a `dark:` twin for each one.
+   -------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-hover: var(--panel-hover);
+  --color-line: var(--line);
+  --color-line-hi: var(--line-hi);
+  --color-well: var(--well);
+  --color-hover: var(--hover);
+  --color-divider: var(--divider);
+  --color-fg: var(--fg);
+  --color-fg-mid: var(--fg-mid);
+  --color-fg-dim: var(--fg-dim);
+  --color-fg-faint: var(--fg-faint);
+  --color-dot: var(--dot);
+  --color-rule: var(--rule);
+  --color-handle: var(--handle);
+
+  /* the elevations are already declared per theme; surfacing them here lets a
+     utility use them (`shadow-lift`) without every caller reaching for a raw
+     `var()` in a style attribute */
+  --shadow-lift: var(--elev-lift);
+  --shadow-lift-lg: var(--elev-lift-lg);
+  --shadow-hud: var(--elev-hud);
+}
+
+/* --------------------------------------------------------------------------
+   3. The two themes
+
+   Dark is the default in CSS, so a browser that never runs the bootstrap
+   script still gets the board it has always shown. `index.html` sets
+   `data-theme` before first paint; the light block is declared second, so it
+   wins whenever the attribute is present.
+   -------------------------------------------------------------------------- */
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* the board */
+  --canvas: #080a0f;
+  --dot: rgb(226 232 240 / 0.22);
+  --rule: rgb(226 232 240 / 0.05);
+  --glow-a: rgb(240 135 60 / 0.13);
+  --glow-b: rgb(139 123 247 / 0.13);
+  --glow-c: rgb(63 191 160 / 0.06);
+  --vignette: inset 0 0 220px 40px rgb(3 5 9 / 0.74);
+  --band: rgb(240 135 60 / 0.12);
+  --band-line: rgb(240 135 60 / 0.55);
+
+  /* glass */
+  --panel: #101623;
+  --panel-hover: #1b2434;
+  --line: rgb(255 255 255 / 0.1);
+  --line-hi: rgb(255 255 255 / 0.2);
+  --well: #1b2331;
+  --hover: rgb(226 232 240 / 0.09);
+  --divider: rgb(226 232 240 / 0.14);
+
+  /* type on the dark board */
+  --fg: #eef2f8;
+  --fg-mid: #c6cfdd;
+  --fg-dim: #8e98aa;
+  --fg-faint: #737d90;
+
+  /* the two link dots on a card */
+  --handle: #eef2f8;
+  --handle-ring: rgb(8 10 15 / 0.55);
+
+  /* paper cards need no outline against a dark board */
+  --card-line: rgb(255 255 255 / 0);
+  --elev-lift: 0 1px 0 rgb(255 255 255 / 0.07) inset, 0 18px 36px -20px rgb(0 0 0 / 0.85);
+  --elev-lift-lg: 0 1px 0 rgb(255 255 255 / 0.09) inset, 0 34px 60px -28px rgb(0 0 0 / 0.9);
+  --elev-hud: 0 18px 40px -24px rgb(0 0 0 / 0.9);
+  --grain: 0.05;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* the board */
+  --canvas: #ffffff;
+  --dot: rgb(15 23 42 / 0.22);
+  --rule: rgb(15 23 42 / 0.045);
+  --glow-a: rgb(240 135 60 / 0.07);
+  --glow-b: rgb(139 123 247 / 0.07);
+  --glow-c: rgb(63 191 160 / 0.05);
+  --vignette: inset 0 0 200px 34px rgb(203 213 225 / 0.5);
+  --band: rgb(240 135 60 / 0.11);
+  --band-line: rgb(240 135 60 / 0.5);
+
+  /* glass */
+  --panel: #ffffff;
+  --panel-hover: #f3f6fb;
+  --line: rgb(15 23 42 / 0.11);
+  --line-hi: rgb(15 23 42 / 0.24);
+  --well: #f1f4f9;
+  --hover: rgb(15 23 42 / 0.07);
+  --divider: rgb(15 23 42 / 0.14);
+
+  /* type on the white board */
+  --fg: #0b1020;
+  --fg-mid: #364056;
+  --fg-dim: #57637a;
+  --fg-faint: #616b7d;
+
+  /* the two link dots on a card */
+  --handle: #101623;
+  --handle-ring: rgb(255 255 255 / 0.9);
+
+  /* warm paper needs a hairline to lift off pure white */
+  --card-line: rgb(15 23 42 / 0.1);
+  --elev-lift: 0 1px 2px rgb(15 23 42 / 0.05), 0 12px 24px -16px rgb(15 23 42 / 0.4);
+  --elev-lift-lg: 0 2px 4px rgb(15 23 42 / 0.06), 0 26px 46px -22px rgb(15 23 42 / 0.45);
+  --elev-hud: 0 12px 30px -18px rgb(15 23 42 / 0.32);
+  --grain: 0.035;
+}
+
+/* ==========================================================================
+   base
+   ========================================================================== */
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    /* reading weight: 400, the real regular face. Anything above it lands on
+       Helvetica Bold, which is the point of the board — but it has to be asked
+       for by name, not inherited by accident. */
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--fg) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-idea) 40%, transparent);
+  }
+}
+
+/* ==========================================================================
+   atmosphere: dotted field, corner glows, film grain, vignette
+
+   Four layers stacked in the background of the canvas wrapper. The dots zoom
+   with the flow (xyflow's <Background>), the rest is fixed to the viewport so
+   the surface never looks like it is sliding around.
+   ========================================================================== */
+
+@utility surface {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--canvas);
+  background-image:
+    radial-gradient(90% 62% at 12% -6%, var(--glow-a), transparent 58%),
+    radial-gradient(80% 60% at 92% 108%, var(--glow-b), transparent 62%),
+    radial-gradient(70% 50% at 70% 12%, var(--glow-c), transparent 65%);
+}
+
+/* film grain — sits above the canvas, below the chrome, and never eats a
+   pointer event */
+@utility grain {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: var(--grain);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+/* the surface falls off towards the edges so the HUD floats in a pool of light */
+@utility vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  box-shadow: var(--vignette);
+}
+
+/*
+ * The same drafting paper as the canvas, printed once and left alone.
+ *
+ * The library screen has no React Flow to zoom, so the two grids are drawn here
+ * as gradients — and they are drawn to the *same proportions the canvas uses*:
+ * a 3px dot on a 26px cell (11.5%), and a rule every 130px, which is exactly
+ * five cells down. The rules are offset by half a cell (13px) so they land on a
+ * dot line rather than between two, which is what makes the board read as
+ * subdivided paper instead of graph paper. Both take the theme tokens, so the
+ * field repaints itself when the lamp changes, same as `<Background>`.
+ */
+@utility field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, var(--color-dot) 1.5px, transparent 1.6px),
+    linear-gradient(to right, var(--color-rule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-rule) 1px, transparent 1px);
+  background-size:
+    26px 26px,
+    130px 130px,
+    130px 130px;
+  background-position:
+    0 0,
+    13px 13px,
+    13px 13px;
+}
+
+/* ==========================================================================
+   chrome
+   ========================================================================== */
+
+@utility hud {
+  background: color-mix(in oklab, var(--panel) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--line);
+  box-shadow: var(--elev-hud);
+}
+
+@utility hairline {
+  background: linear-gradient(90deg, transparent, var(--divider) 22%, var(--divider) 78%, transparent);
+  height: 1px;
+}
+
+@utility label {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+  /* a real bold cap run needs tighter tracking than a light one or the letters
+     drift apart */
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+/* the same voice as `label`, for the marks printed inside cards and rows */
+@utility micro {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 9.5px;
+  line-height: 1.1;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+/* the inspector is the only scrollable surface, so it gets a quiet one */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-hi) transparent;
+}
+
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-hi);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-faint);
+  background-clip: content-box;
+}
+
+@utility kbd {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 9.5px;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  color: var(--fg-mid);
+  padding: 3px 5px 2px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--well);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.28);
+}
+
+/* ==========================================================================
+   cards
+   ========================================================================== */
+
+@utility card {
+  position: relative;
+  width: 16rem;
+  border-radius: 0.875rem;
+  border: 1px solid var(--card-line);
+  background: var(--color-paper);
+  color: var(--color-paper-700);
+  box-shadow: var(--elev-lift);
+  transition:
+    box-shadow 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    outline-color 200ms ease;
+}
+
+.card:hover {
+  box-shadow: var(--elev-lift-lg);
+}
+
+/*
+ * Selected cards lift and wear their kind's accent. Data attributes instead of
+ * interpolated class names: Tailwind only sees class names it can find in the
+ * source, and this also keeps the kind -> colour mapping in one place.
+ */
+.card[data-selected='true'] {
+  transform: translateY(-2px);
+  box-shadow: var(--elev-lift-lg);
+  outline: 1.5px solid transparent;
+  outline-offset: 3px;
+}
+
+.card[data-kind='idea'][data-selected='true'] {
+  outline-color: var(--color-idea);
+  box-shadow: var(--elev-lift-lg), 0 0 36px -12px var(--color-idea);
+}
+
+.card[data-kind='question'][data-selected='true'] {
+  outline-color: var(--color-question);
+  box-shadow: var(--elev-lift-lg), 0 0 36px -12px var(--color-question);
+}
+
+.card[data-kind='evidence'][data-selected='true'] {
+  outline-color: var(--color-evidence);
+  box-shadow: var(--elev-lift-lg), 0 0 36px -12px var(--color-evidence);
+}
+
+/* --------------------------------------------------------------------------
+   library cards
+
+   The same material as a card on the board — warm paper, printed, lifted — so
+   the library reads as a tray of the very things you can open. Only the gesture
+   differs: a canvas card is picked up and dragged, a library card is opened.
+   -------------------------------------------------------------------------- */
+
+@utility lib-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  border-radius: 0.875rem;
+  border: 1px solid var(--card-line);
+  background: var(--color-paper);
+  color: var(--color-paper-700);
+  box-shadow: var(--elev-lift);
+  outline: 1.5px solid transparent;
+  outline-offset: 3px;
+  transition:
+    box-shadow 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    outline-color 200ms ease;
+}
+
+.lib-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--elev-lift-lg);
+  outline-color: color-mix(in oklab, var(--color-idea) 55%, transparent);
+}
+
+/* a keyboard user needs a ring they can tell from a hover, so the accent goes
+   to full strength and the ring thickens */
+.lib-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: var(--elev-lift-lg);
+  outline-width: 2.5px;
+  outline-color: var(--color-idea);
+}
+
+/*
+ * Card titles, in real Helvetica Bold.
+ *
+ * These used to be set in Instrument Serif — one 400 face, thickened by a
+ * hairline stroke. Helvetica has a true bold, so the stroke is gone and the
+ * weight is now drawn by the designer rather than simulated by the browser.
+ */
+@utility card-title {
+  font-family: var(--font-sans);
+  font-size: 1.17rem;
+  line-height: 1.24;
+  font-weight: 700;
+  /* Helvetica Bold runs wide next to the serif it replaced; a touch of negative
+     tracking buys back the optical fit without touching the layout */
+  letter-spacing: -0.018em;
+  color: #17130d;
+}
+
+/* the textarea that replaces the title while editing must not jump */
+@utility card-editor {
+  font-family: var(--font-sans);
+  font-size: 1.17rem;
+  line-height: 1.24;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  color: #17130d;
+  width: 100%;
+  resize: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  field-sizing: content;
+  min-height: 2.5em;
+  caret-color: var(--color-idea);
+}
+
+/* ==========================================================================
+   edges
+   ========================================================================== */
+
+@utility edge-march {
+  stroke-dasharray: 7 6;
+  animation: march 900ms linear infinite;
+}
+
+@keyframes march {
+  to {
+    stroke-dashoffset: -13;
+  }
+}
+
+/* the fat, invisible copy of the path that makes a 1.6px line clickable */
+@utility edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+/* ==========================================================================
+   entrance choreography
+
+   `backwards` (not `both`) on purpose: the final keyframe must hand control
+   back to the element so the hover/selected transitions keep working
+   afterwards. Stagger delays are passed inline, per element.
+   ========================================================================== */
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.965);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes beacon {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@utility anim-card {
+  animation: card-in 540ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+@utility anim-rise {
+  animation: rise-in 600ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+
+@utility anim-beacon {
+  animation: beacon 1.6s ease-in-out infinite;
+}
+
+/* ==========================================================================
+   xyflow overrides
+   ========================================================================== */
+
+.react-flow__node {
+  /* the entrance animation lives on the inner card, so xyflow owns `transform`
+     here and the two never fight over it */
+  cursor: grab;
+}
+
+.react-flow__node.dragging {
+  cursor: grabbing;
+}
+
+.react-flow__node:focus-visible {
+  outline: none;
+}
+
+.react-flow__nodesselection-rect,
+.react-flow__selection {
+  background: var(--band);
+  border: 1px dashed var(--band-line);
+}
+
+.react-flow__node .react-flow__handle {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  border: 1.5px solid var(--handle-ring);
+  background: var(--handle);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.5);
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 180ms ease;
+}
+
+.react-flow__node .react-flow__handle:hover {
+  transform: scale(1.45);
+  background: var(--color-idea);
+}
+
+.react-flow__node .react-flow__handle-left {
+  left: -6px;
+}
+
+.react-flow__node .react-flow__handle-right {
+  right: -6px;
+}
+
+.react-flow__edge-path {
+  pointer-events: none;
+}
+
+.react-flow__pane {
+  cursor: default;
+}
+
+.react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+/* the toolbar xyflow would render — we ship our own control cluster instead */
+.react-flow__controls,
+.react-flow__minimap,
+.react-flow__attribution {
+  display: none;
+}
+
+/* ==========================================================================
+   theme flip
+
+   One crossfade for the whole frame, so switching light/dark reads as the
+   same board under a different lamp instead of a hard repaint.
+   ========================================================================== */
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  /* the default `plus-lighter` blend bleaches a colour swap */
+  mix-blend-mode: normal;
+}
+
+/* ==========================================================================
+   reduced motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

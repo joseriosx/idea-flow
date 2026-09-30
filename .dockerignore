@@ -1,0 +1,51 @@
+# Build context is the REPOSITORY ROOT for both apps (see compose*.yaml:
+# `context: .` + `dockerfile: apps/<app>/Dockerfile`), so this file is what
+# keeps the context small and, more importantly, keeps secrets out of images.
+
+# --- git ------------------------------------------------------------------
+.git
+.gitignore
+.github
+
+# --- secrets (critical: a `COPY . .` would bake these into the image) -----
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# --- dependencies / build output (huge, host-built, wrong platform) --------
+**/node_modules
+**/dist
+**/build
+**/out
+**/coverage
+**/.vite
+**/.turbo
+**/.cache
+**/.next
+**/.nuxt
+**/*.tsbuildinfo
+
+# --- test / tooling artefacts ---------------------------------------------
+**/test-results
+**/playwright-report
+**/.playwright
+**/cypress/screenshots
+**/cypress/videos
+**/.eslintcache
+
+# --- local database data (prod bind mount target) -------------------------
+infra/postgres/data
+
+# --- editors / OS ---------------------------------------------------------
+**/.DS_Store
+**/.idea
+**/.vscode
+**/*.swp
+Dockerfile
+**/Dockerfile
+Dockerfile.*
+**/Dockerfile.*
+.dockerignore
