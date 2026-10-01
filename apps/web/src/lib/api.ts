@@ -48,6 +48,15 @@ export const API_CONFIGURED = API_BASE !== ''
 export const DEFAULT_BOARD_ID = 'demo'
 
 /**
+ * The name that board wears when there is no api to ask.
+ *
+ * The library and the home preview both name the on-device board, and the two
+ * must not drift apart — so the name lives here next to its id rather than in
+ * either screen.
+ */
+export const DEFAULT_BOARD_NAME = 'Demo board'
+
+/**
  * An explicit `VITE_GRAPH_PATH` wins for every board, because an api that
  * publishes one fixed path has no per-board addressing to offer. Left unset,
  * boards are addressed individually, which is what the library needs.

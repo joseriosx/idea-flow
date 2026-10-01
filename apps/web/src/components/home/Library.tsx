@@ -1,31 +1,29 @@
 import { useBoards } from '../../hooks/useBoards'
-import { DEFAULT_BOARD_ID, type BoardSummary } from '../../lib/api'
+import { DEFAULT_BOARD_ID, DEFAULT_BOARD_NAME, type BoardSummary } from '../../lib/api'
 import { useNavStore } from '../../store/navStore'
 import { IconArrow, IconPlus } from '../icons'
 
 /* ==========================================================================
    The library
 
-   A tray of the boards this app knows about. Three things had to be true at
-   once and they shaped every decision below:
+   A gallery of the boards this app knows about, wearing the concept's clothes:
+   a gradient card per project, a number, and a small dotted preview of the map
+   inside. Three rules from before still hold and shaped everything here:
 
-   1. It is never a dead end. The api is optional, so "no boards" and "the api
-      is down" both still have to leave the reader with something to open — the
-      on-device board is always offered, plainly labelled as being on the
-      device, because it *is* on the device.
-   2. It never invents. There is no create endpoint in this api, so the "new
-      project" tile says so out loud instead of pretending. A disabled control
-      that explains itself is honest; one that silently does nothing is a bug
-      report waiting to happen.
-   3. It is made of the same stuff as the canvas. Paper cards, micro labels,
-      the accent that belongs to an idea — so moving between the two screens
-      feels like moving between two rooms, not two products.
+   1. It is never a dead end. The api is optional, so "no boards" and "the api is
+      down" both still leave something to open — the on-device board, plainly
+      labelled as being on the device, because it *is* on the device.
+   2. It never invents. There is no create endpoint, so the new-project tile says
+      so out loud and opens a dialog that says it again rather than pretending.
+   3. Where a board came from is carried explicitly, not guessed from its id: the
+      api's demo board and the on-device one share the id `demo`, so keying off
+      the id would label the api's card "on this device".
    ========================================================================== */
 
 /** The board that lives in localStorage, whether or not an api ever answers. */
 const ON_DEVICE: BoardSummary = {
   id: DEFAULT_BOARD_ID,
-  name: 'Demo board',
+  name: DEFAULT_BOARD_NAME,
   description:
     'Seeded on this device. The repair-club argument, ready to rearrange — it works with the api switched off entirely.',
   updatedAt: null,
@@ -42,17 +40,12 @@ function when(iso: string | null): string | null {
   })
 }
 
-export function Library() {
+export function Library({ onCreate }: { onCreate: () => void }) {
   const { phase, boards, detail, reload, configured } = useBoards()
   const openBoard = useNavStore((s) => s.openBoard)
 
   // While loading there is nothing true to show yet; while the api is down the
   // on-device board is the honest answer, and it is a real card, not a message.
-  //
-  // Where a board came from is carried explicitly rather than inferred from its
-  // id: the api's demo board and the on-device one share the id `demo`, so
-  // keying off the id would label the api's card "on this device" — true of the
-  // device, misleading about the card.
   const entries: { board: BoardSummary; onDevice: boolean }[] =
     phase === 'ready'
       ? boards.map((board) => ({ board, onDevice: false }))
@@ -61,63 +54,59 @@ export function Library() {
         : []
   const empty = phase === 'ready' && boards.length === 0
 
-  const status =
-    phase === 'loading'
-      ? 'looking'
-      : phase === 'failed'
-        ? configured
-          ? 'api unreachable'
-          : 'on this device only'
-        : boards.length === 0
-          ? 'empty'
-          : `${boards.length} ${boards.length === 1 ? 'project' : 'projects'}`
-
   return (
-    <section className="anim-rise mt-12 sm:mt-16" style={{ animationDelay: '300ms' }}>
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="label">projects</h2>
-        <span className="micro text-fg-faint">{status}</span>
+    <section className="hf-library">
+      <div className="hf-lib-head">
+        <div>
+          <div className="hf-eyebrow">Your workspace</div>
+          <h2 className="hf-lib-title">
+            PROJECT
+            <br />
+            LIBRARY
+          </h2>
+        </div>
+        <p>
+          Seus mapas ficam aqui. Abra um projeto existente ou crie um novo quadro
+          para começar uma linha de raciocínio.
+        </p>
       </div>
 
-      {phase === 'failed' && (
-        <Notice detail={detail} configured={configured} onRetry={reload} />
-      )}
+      {phase === 'failed' && <Notice detail={detail} configured={configured} onRetry={reload} />}
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {phase === 'loading' &&
-          [0, 1, 2].map((i) => <Skeleton key={i} />)}
+      <div className="hf-gallery">
+        {phase === 'loading' && [0, 1, 2].map((i) => <Skeleton key={i} tone={i} />)}
 
         {entries.map(({ board, onDevice }, index) => (
           <BoardCard
             key={board.id}
             board={board}
             onDevice={onDevice}
-            delay={360 + index * 70}
+            index={index}
             onOpen={() => openBoard(board.id)}
           />
         ))}
 
         {/* a board always exists to open, so the empty tray is never a corner */}
         {empty && (
-          <div className="anim-rise col-span-full" style={{ animationDelay: '340ms' }}>
-            <p className="text-[13px] leading-[1.55] text-fg-dim">
+          <div className="hf-empty">
+            <p>
               Nothing here yet — the api is answering, and it has no boards to
               show.
             </p>
             <button
               type="button"
               onClick={() => openBoard(DEFAULT_BOARD_ID)}
-              className="group mt-3 inline-flex items-center gap-2 text-[12.5px] text-fg-mid transition-colors hover:text-fg"
+              className="hf-link"
             >
               Open the board kept on this device
-              <IconArrow className="h-3 w-3 -translate-x-1 opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100" />
+              <IconArrow className="hf-link-arrow h-3 w-3" />
             </button>
           </div>
         )}
 
         {/* the tile promises a create endpoint, so it has no business showing
             while the api that would have to serve one is not answering */}
-        {phase === 'ready' && <NewProjectTile />}
+        {phase === 'ready' && <NewProject onClick={onCreate} />}
       </div>
     </section>
   )
@@ -144,32 +133,22 @@ function Notice({
 }) {
   return (
     <div
-      className="hud anim-rise mt-4 flex items-start gap-3.5 rounded-2xl px-4 py-3.5"
+      className="hf-notice"
       title={configured ? `the api did not answer — ${detail}` : detail}
     >
-      <span
-        className="mt-[5px] h-2 w-2 shrink-0 rounded-full"
-        style={{
-          background: 'var(--color-idea)',
-          boxShadow: '0 0 10px var(--color-idea)',
-        }}
-      />
+      <span className="hf-notice-dot" />
       <div className="min-w-0 flex-1">
-        <p className="micro text-fg-mid">
+        <p className="hf-notice-title">
           {configured ? 'the api did not answer' : 'no api configured'}
         </p>
-        <p className="mt-1.5 text-[12px] leading-[1.55] text-fg-dim">
+        <p className="hf-notice-body">
           {configured
             ? 'Nothing is lost — the board below lives on this device. The api may still be starting.'
             : 'The board below lives on this device and works with the api switched off entirely. Set VITE_API_URL and rebuild to see your projects here.'}
         </p>
       </div>
       {configured && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="micro shrink-0 rounded-full border border-line px-3 py-2 text-fg-mid transition-colors hover:bg-hover hover:text-fg"
-        >
+        <button type="button" onClick={onRetry} className="hf-btn hf-btn-ghost hf-retry">
           retry
         </button>
       )}
@@ -177,37 +156,31 @@ function Notice({
   )
 }
 
-/** Matches the real card's box so the grid never jumps when the data lands. */
-function Skeleton() {
+/** Keeps the card's box so the gallery never jumps when the data lands. */
+function Skeleton({ tone }: { tone: number }) {
   return (
-    <div
-      className="min-h-[13.25rem] animate-pulse rounded-[0.875rem] border border-card-line bg-paper"
-      style={{ boxShadow: 'var(--elev-lift)' }}
-    >
-      <div className="flex flex-col gap-2.5 px-4 pb-4 pt-4">
-        <div className="h-2 w-16 rounded-full bg-paper-600/25" />
-        <div className="h-3.5 w-2/3 rounded-full bg-paper-600/25" />
-        <div className="h-2.5 w-full rounded-full bg-paper-600/15" />
-        <div className="h-2.5 w-4/5 rounded-full bg-paper-600/15" />
-      </div>
+    <div className={`hf-project hf-tone-${tone + 1} hf-skeleton`} aria-hidden="true">
+      <div className="hf-bar h-2 w-16" />
+      <div className="hf-bar mt-6 h-7 w-2/3" />
+      <div className="hf-bar mt-4 h-3 w-4/5" />
     </div>
   )
 }
 
-function NewProjectTile() {
+function NewProject({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      disabled
-      title="There is no create endpoint in the api yet, so this cannot be pressed. The Demo board is the only project it serves today."
-      className="flex min-h-[13.25rem] w-full cursor-not-allowed flex-col items-center justify-center gap-2.5 rounded-[0.875rem] border-[1.5px] border-dashed border-line-hi px-4 text-center"
+      onClick={onClick}
+      title="New boards need a create endpoint — there is none yet"
+      className="hf-new"
     >
-      <span className="grid h-9 w-9 place-items-center rounded-full border border-dashed border-line-hi text-fg-faint">
+      <span className="hf-new-icon">
         <IconPlus className="h-3.5 w-3.5" />
       </span>
-      <span className="micro text-fg-dim">new project</span>
-      <span className="max-w-[12rem] text-[11px] leading-[1.45] text-fg-faint">
-        The api has no create endpoint yet.
+      <span className="hf-new-label">new project</span>
+      <span className="hf-new-hint">
+        Criação ainda não está ligada — a api não tem endpoint para criar quadros.
       </span>
     </button>
   )
@@ -220,44 +193,39 @@ function NewProjectTile() {
 function BoardCard({
   board,
   onDevice,
-  delay,
+  index,
   onOpen,
 }: {
   board: BoardSummary
   onDevice: boolean
-  delay: number
+  index: number
   onOpen: () => void
 }) {
+  const tone = (index % 3) + 1
   const stamp = when(board.updatedAt)
-  const meta = onDevice ? 'on this device' : stamp ?? `id · ${board.id}`
+  const provenance = onDevice ? 'ON DEVICE' : board.id.toUpperCase()
+  const number = `${String(index + 1).padStart(2, '0')} · ${provenance}`
 
   return (
     <button
       type="button"
       onClick={onOpen}
       title={`Open ${board.name}`}
-      className="lib-card group anim-rise min-h-[13.25rem] px-4 pb-3.5 pt-4"
-      style={{ animationDelay: `${delay}ms` }}
+      className={`hf-project hf-tone-${tone} anim-card`}
+      style={{ animationDelay: `${320 + index * 70}ms` }}
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="micro text-paper-600">{onDevice ? 'on this device' : 'board'}</span>
-        <span className="micro text-paper-600/70">{board.id}</span>
+      <div className="hf-num-row">
+        <span className="hf-num">{number}</span>
+        {stamp && <span className="hf-when">{stamp}</span>}
       </div>
 
-      <h3 className="mt-3 text-[1.06rem] font-bold leading-[1.2] tracking-[-0.016em]">
-        {board.name}
-      </h3>
-      <p className="mt-1.5 flex-1 text-[12px] leading-[1.5] text-paper-600">
-        {board.description || 'No description.'}
-      </p>
+      <h3>{board.name}</h3>
+      <p>{board.description || 'No description.'}</p>
 
-      {/* a rule printed on paper, so it is a tone of the sheet rather than the
-          cool divider the dark board uses */}
-      <div className="mt-3.5 h-px w-full bg-paper-200" />
-
-      <div className="mt-2.5 flex items-center justify-between">
-        <span className="micro text-paper-600/80">{meta}</span>
-        <IconArrow className="h-3 w-3 -translate-x-1 opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100" />
+      <div className="hf-mini" aria-hidden="true">
+        <i />
+        <i />
+        <i />
       </div>
     </button>
   )
