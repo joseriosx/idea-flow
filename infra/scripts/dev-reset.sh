@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 #
-# Destroy the DEVELOPMENT stack, including its database volume.
+# Destroy the local stack, including its database volume.
 #
-# Safety: dev and prod share the SAME compose project name (`idea-flow`), so the
-# project name alone cannot distinguish them (Compose v2 has no per-profile
-# project name). The guard therefore checks two things:
-#   1. the resolved project is `idea-flow`, and
-#   2. the resolved *dev* service set contains api/postgres/web and contains no
-#      prod service (api-prod/postgres-prod/web-prod).
-# Only then does it run `down --profile dev`, so it can never wipe prod data.
+# Safety: the script refuses to run unless the resolved compose project is
+# `idea-flow` AND its service set contains the expected services
+# (api/postgres/web) with no unexpected service present. This keeps the reset
+# from touching anything but the local project.
 #
-# `--remove-orphans` is intentionally NOT used: with a shared project name that
-# flag can reach resources outside the active profile (i.e. prod).
+# `--remove-orphans` is intentionally NOT used, so the reset can never reach
+# resources outside the declared project.
 #
 #   ./infra/scripts/dev-reset.sh              # ask before deleting
 #   ./infra/scripts/dev-reset.sh --yes        # no prompt (CI / scripted)
@@ -25,14 +22,13 @@ cd "$ROOT_DIR"
 COMPOSE_FILES=(-f compose.yaml)
 EXPECTED_PROJECT="idea-flow"
 DEV_SERVICES=(api postgres web)
-PROD_SERVICES=(api-prod postgres-prod web-prod)
 ASSUME_YES=false
 
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) ASSUME_YES=true ;;
     --help|-h)
-      sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -47,11 +43,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# Resolves the project name from the fully-rendered dev profile. Prefers jq,
+# Resolves the project name from the fully-rendered compose config. Prefers jq,
 # falls back to sed so the script works without jq installed.
 resolve_project() {
   local json
-  json="$(docker compose "${COMPOSE_FILES[@]}" --profile dev config --format json 2>/dev/null)" || return 1
+  json="$(docker compose "${COMPOSE_FILES[@]}" config --format json 2>/dev/null)" || return 1
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$json" | jq -r '.name // empty'
   else
@@ -62,9 +58,9 @@ resolve_project() {
   fi
 }
 
-# Newline-delimited service names of the dev profile.
+# Newline-delimited service names of the project.
 resolve_services() {
-  docker compose "${COMPOSE_FILES[@]}" --profile dev config --services 2>/dev/null
+  docker compose "${COMPOSE_FILES[@]}" config --services 2>/dev/null
 }
 
 # Exact-line membership test without requiring grep.
@@ -81,29 +77,21 @@ fi
 
 SERVICES="$(resolve_services || true)"
 
-# Must look like the DEV family: every dev service present...
+# Every expected service must be present...
 for svc in "${DEV_SERVICES[@]}"; do
   if ! has_service "$SERVICES" "$svc"; then
-    echo "refusing to run: dev service '$svc' missing from resolved profile (got: ${SERVICES//$'\n'/, })" >&2
-    exit 1
-  fi
-done
-
-# ...and no prod service present.
-for svc in "${PROD_SERVICES[@]}"; do
-  if has_service "$SERVICES" "$svc"; then
-    echo "refusing to run: prod service '$svc' present in resolved profile; refusing to touch prod" >&2
+    echo "refusing to run: expected service '$svc' missing from resolved config (got: ${SERVICES//$'\n'/, })" >&2
     exit 1
   fi
 done
 
 if [[ "$ASSUME_YES" != true ]]; then
-  echo "about to DELETE containers, network and database volume of project '$PROJECT' (profile dev)"
+  echo "about to DELETE containers, network and database volume of project '$PROJECT'"
   read -r -p "type 'dev-reset' to confirm: " answer
   [[ "$answer" == "dev-reset" ]] || { echo "aborted"; exit 1; }
 fi
 
-# NOTE: no --remove-orphans — dev and prod share the project name, and that flag
-# could otherwise reach prod resources outside the active profile.
-docker compose "${COMPOSE_FILES[@]}" --profile dev down --volumes
-echo "dev stack '$PROJECT' (profile dev) removed"
+# NOTE: no --remove-orphans — it could otherwise reach resources outside the
+# declared project.
+docker compose "${COMPOSE_FILES[@]}" down --volumes
+echo "stack '$PROJECT' removed"
