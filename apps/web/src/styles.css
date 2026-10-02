@@ -221,6 +221,11 @@
   --hf-btn-ghost: rgb(255 255 255 / 0.08);
   --hf-note-bg: rgb(240 135 60 / 0.10);
   --hf-note-line: rgb(240 135 60 / 0.28);
+  /* the destructive accent: dark enough to carry white text on a button in
+     both rooms, and a second step of it for type on a card */
+  --hf-danger: #b83225;
+  --hf-danger-text: #e2604f;
+  --hf-danger-wash: rgb(226 96 79 / 0.14);
 }
 
 [data-theme='light'] {
@@ -331,6 +336,9 @@
   --hf-btn-ghost: #ecebe6;
   --hf-note-bg: rgb(240 135 60 / 0.10);
   --hf-note-line: rgb(240 135 60 / 0.30);
+  --hf-danger: #b83225;
+  --hf-danger-text: #b83225;
+  --hf-danger-wash: rgb(184 50 37 / 0.10);
 }
 
 /* ==========================================================================
@@ -1273,6 +1281,30 @@
 
 .hf-project:hover { transform: translateY(-6px); box-shadow: 0 30px 62px rgb(50 60 72 / 0.18); }
 
+/* the card's single tab stop: an invisible lid over everything the card draws, so
+   a click anywhere still opens the board and the whole card is one stop */
+.hf-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.hf-open:focus-visible { outline: none; }
+
+.hf-project:has(.hf-open:focus-visible) {
+  outline: 2px solid var(--hf-ink);
+  outline-offset: 3px;
+}
+
 .hf-tone-1 { --hf-proj-bg: var(--hf-proj1); }
 .hf-tone-2 { --hf-proj-bg: var(--hf-proj2); }
 .hf-tone-3 { --hf-proj-bg: var(--hf-proj3); }
@@ -1284,7 +1316,103 @@
   color: var(--hf-proj-num);
 }
 
-.hf-num-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.hf-num-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* the number keeps its place and the actions take the rest. Above the card's
+   lid, or a click would open the board instead of reaching the buttons */
+.hf-tools {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Two controls, drawn where they are. A pill rather than two loose icons, so the
+   pair reads as one thing — and no portal, because nothing here escapes the
+   card, which is the entire reason the previous menu had to be one.
+
+   This is the stacking context, not `.hf-tools`: the lid is a sibling further up,
+   and an element only clears it if it is positioned itself. */
+.hf-tools-pill {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--hf-proj-line);
+  background: var(--hf-round-bg);
+  opacity: 0.72;
+  transition: opacity 180ms ease;
+}
+
+/* always painted, never hidden: a thumb has no hover to reveal them, and a
+   control the reader has to discover is a control they will not find */
+.hf-project:hover .hf-tools-pill,
+.hf-tools-pill:focus-within { opacity: 1; }
+
+.hf-tool {
+  width: 27px;
+  height: 27px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hf-proj-num);
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.hf-tool:hover:not([disabled]) { background: var(--hf-round-hover); color: var(--hf-ink); }
+.hf-tool:active:not([disabled]) { transform: scale(0.9); }
+
+.hf-tool:focus-visible {
+  outline: 2px solid var(--hf-ink);
+  outline-offset: 1px;
+  color: var(--hf-ink);
+}
+
+/* the padlock switch: pressed and visibly so, so the state is not carried by the
+   icon alone — a lock that changes shape can be missed at a glance */
+.hf-tool.is-lock[aria-pressed='true'] {
+  background: var(--hf-proj-line);
+  color: var(--hf-ink);
+  box-shadow: inset 0 0 0 1px var(--hf-proj-line);
+}
+
+.hf-tool.is-danger { color: var(--hf-danger-text); }
+.hf-tool.is-danger:hover:not([disabled]),
+.hf-tool.is-danger:focus-visible { background: var(--hf-danger-wash); color: var(--hf-danger-text); }
+
+/* The padlock. On a board the reader locked it is a live switch wearing a closed
+   lock; on a board the api serves it is the same closed lock with nothing to
+   click, which is why the two differ only by cursor, not by shape — the reader
+   must be able to tell at a glance which is a fact and which is a button. */
+.hf-tool.is-lock { color: var(--hf-faint); }
+
+button.hf-tool.is-lock:hover:not([disabled]) { background: var(--hf-round-hover); color: var(--hf-ink); }
+button.hf-tool.is-lock:active:not([disabled]) { transform: scale(0.9); }
+
+.hf-tool.is-lock.is-on { color: var(--hf-ink); }
+
+/* not a control — a closed lock with no switch behind it */
+.hf-tool.is-lock:not(button) { cursor: default; }
+
+/* an action the api cannot serve is shown, not hidden — and says so, rather
+   than being a control that silently does nothing */
+.hf-tool[disabled] {
+  color: var(--hf-faint);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.hf-tool[disabled]:hover { background: transparent; color: var(--hf-faint); }
 
 .hf-when {
   font-size: 10px;
@@ -1296,6 +1424,29 @@
 
 .hf-project h3 { margin: 22px 0 7px; font-size: 29px; line-height: 1.05; letter-spacing: -0.05em; color: var(--hf-ink); }
 .hf-project p { max-width: 80%; margin: 0; font-size: 12px; line-height: 1.55; color: var(--hf-proj-body); }
+
+/* the name, being written: the same type as the title it stands in for, with a
+   single hairline where the underline would be. Above the card's lid, or the
+   click would open the board instead of the caret. No focus colour is needed —
+   the field is only ever on screen while it is being written into, so the caret
+   itself is the focus cue. */
+.hf-rename {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  margin: 22px 0 7px;
+  padding: 0 0 5px;
+  border: 0;
+  border-bottom: 1.5px solid var(--hf-ink);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hf-ink);
+  font: inherit;
+  font-size: 29px;
+  line-height: 1.05;
+  letter-spacing: -0.05em;
+  outline: none;
+}
 
 .hf-mini {
   position: absolute;
@@ -1349,24 +1500,10 @@
 
 .hf-bar { border-radius: 999px; background: color-mix(in oklab, var(--hf-ink) 14%, transparent); }
 
-/* the honest "no boards" and "no create endpoint" states */
+/* the honest "nothing here" state. The way out is the tile beside it, so there is
+   no second link to draw and nothing to keep in step with this copy */
 .hf-empty { grid-column: 1 / -1; max-width: 34rem; color: var(--hf-muted); font-size: 13px; line-height: 1.55; }
-
-.hf-link {
-  margin-top: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  font-size: 12.5px;
-  color: var(--hf-ink);
-}
-
-.hf-link .hf-link-arrow { transition: transform 200ms ease, opacity 200ms ease; transform: translateX(-6px); opacity: 0; }
-.hf-link:hover .hf-link-arrow { transform: translateX(0); opacity: 1; }
+.hf-empty p + p { margin-top: 8px; }
 
 .hf-notice {
   max-width: 1180px;
@@ -1528,6 +1665,12 @@
 
 .hf-btn-black { background: #111; color: #fff; }
 .hf-btn-black:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* the one button in the app that destroys something, so it is the one button
+   that is allowed to be red */
+.hf-btn-danger { background: var(--hf-danger); color: #fff; }
+.hf-btn-danger:hover { filter: brightness(1.06); }
+.hf-btn-danger:focus-visible { outline: 2px solid var(--hf-danger); outline-offset: 2px; }
 
 /* --------------------------------------------------------------------------
    the landing screen at the two widths that change it

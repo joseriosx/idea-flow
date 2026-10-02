@@ -5,13 +5,17 @@ import { Canvas } from './components/Canvas'
 import { Chrome } from './components/Chrome'
 import { Home } from './components/home/Home'
 import { useShortcuts } from './hooks/useShortcuts'
+import { useLocalBoardGraph } from './hooks/useLocalBoardGraph'
 import { DEFAULT_BOARD_ID, fetchBoard } from './lib/api'
+import { cleanupLegacyCanvas } from './lib/cleanupCanvas'
 import { useFlowStore } from './store/flowStore'
+import { useLocalBoards } from './store/localBoardStore'
 import { useNavStore } from './store/navStore'
 
 function Board() {
   useShortcuts()
   useBoardLoader()
+  useLocalBoardGraph()
 
   return (
     <div className="surface relative h-full w-full overflow-hidden">
@@ -36,9 +40,16 @@ function Board() {
  * That board is loaded the way it always has been: the import control in the
  * chrome, or `R` for the seed.
  *
- * Any *other* board has no local copy, so there is nothing to lose and the api
- * is the only place it can come from. A failure there leaves whatever was
- * already drawn alone and says why.
+ * Any *other* board falls into one of two cases, and only one of them is worth a
+ * request:
+ *
+ * - It is a board kept on this device. It has no copy on the server, so asking
+ *   for one can only ever 404 — and its drawing is already here, in
+ *   `useLocalBoardGraph`. This is what makes a board created in the library
+ *   openable at all.
+ * - Otherwise it really is the api's, so there is nothing to lose and the api is
+ *   the only place it can come from. A failure there leaves whatever was already
+ *   drawn alone and says why.
  */
 function useBoardLoader() {
   const boardId = useNavStore((s) => s.boardId)
@@ -48,6 +59,10 @@ function useBoardLoader() {
 
   useEffect(() => {
     if (boardId === DEFAULT_BOARD_ID) return
+
+    // read through `getState` on purpose: subscribing here would put the api
+    // fetch in the same render as a rename in the library, for no gain
+    if (useLocalBoards.getState().boards.some((b) => b.id === boardId)) return
 
     let alive = true
     void (async () => {
@@ -83,6 +98,10 @@ function useBoardLoader() {
  */
 export default function App() {
   const view = useNavStore((s) => s.view)
+
+  useEffect(() => {
+    cleanupLegacyCanvas()
+  }, [])
 
   if (view === 'home') return <Home />
 

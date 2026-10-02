@@ -37,6 +37,12 @@ export function Home() {
 
   const openCreate = useCallback(() => setCreating(true), [])
   const closeCreate = useCallback(() => setCreating(false), [])
+  // A new board is only visible in the library, so a reader who created one from
+  // the hero would otherwise be left looking at the hero, wondering if it worked.
+  const showLibrary = useCallback(() => {
+    setCreating(false)
+    setMode('library')
+  }, [])
 
   // The board binds `T` itself, but the board is not mounted here — so without
   // this the lamp would be the one control the home could not reach.
@@ -79,7 +85,7 @@ export function Home() {
 
       {/* the dialog is fixed, so it lives outside the scroll container rather
           than being clipped by it */}
-      <CreateModal open={creating} onClose={closeCreate} />
+      <CreateModal open={creating} onClose={closeCreate} onCreated={showLibrary} />
     </>
   )
 }

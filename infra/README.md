@@ -110,7 +110,7 @@ Migrations must not run from the `api` container's entrypoint: with
 containers would race. Run them as a one-off:
 
 ```bash
-docker compose -f compose.yaml -f compose.dev.yaml run --rm api npm run migrate
+docker compose --profile dev run --rm api npm run migrate
 ```
 
 `run` honours `depends_on`, so postgres is already healthy and reachable.
@@ -125,3 +125,56 @@ docker compose -f compose.yaml -f compose.dev.yaml run --rm api npm run migrate
 - **No `read_only` filesystem / non-root enforcement on the app containers.**
   Adding those needs the images to declare a writable path first, and a wrong
   guess breaks writes in production. Revisit once the images are final.
+
+## Dev vs Prod (profiles)
+
+The stack uses a single `compose.yaml` with profiles:
+
+- **dev** (profile `dev`): services `postgres`, `api`, `web`. 
+  - Published ports (loopback only): `127.0.0.1:${POSTGRES_PORT:-5432}:5432`, `127.0.0.1:${API_PORT:-3000}:3000`, `127.0.0.1:${WEB_PORT:-5173}:5173`
+  - Hot reload (tsx watch, Vite HMR), bind mounts of source code, `restart: "no"` for api.
+  - Uses `.env` by default (via `APP_ENV_FILE`), defaults are safe so `docker compose --profile dev up` works from a clean clone.
+
+- **prod** (profile `prod`): services `postgres-prod`, `api-prod`, `web-prod`.
+  - Published ports: only `web-prod` on `${PROD_WEB_PORT:-8080}:8080` (host). API and Postgres are **not published** (api exposed internally only). 
+  - No source mounts; images built with `target: prod`. 
+  - Hardening: `api-prod` has `cap_drop: [ALL]` and `security_opt: [no-new-privileges:true]`. 
+  - `depends_on` uses `service_healthy` conditions where applicable. 
+  - Uses `.env.prod` by default (via `APP_ENV_FILE`), and sensitive values are required via `:?` in prod.
+
+Commands:
+- Dev: `docker compose --profile dev up -d --build`
+- Prod: `docker compose --env-file .env.prod --profile prod up -d --build`
+- Validate: `docker compose --profile dev config -q && docker compose --env-file .env.prod --profile prod config -q`
+
+## Route contract
+
+The `/api` prefix is **added by the proxy** and **must NOT** be implemented by the API routes:
+
+- **Prod**: `infra/nginx/web.conf` runs on the web container (port 8080) and proxies `/api/*` to the API. It strips the `/api` prefix, so the API receives unprefixed paths (e.g., `/graphs/demo`, `/health`).
+- **Dev**: the browser reaches the API directly at `http://localhost:3000` by default (or via Vite proxy if configured). The API serves only unprefixed canonical routes (`/graphs`, `/graphs/demo`, `/boards`, `/boards/:id`, `/health`, `/healthz`).
+
+Therefore, API route handlers are registered at root paths. Any `/api/*` aliases were intentionally removed to prevent double-prefixing in prod. The nginx config sets `$api_upstream "api:3000"` and we expose the prod API service under the network alias `api` (via `networks.idea-flow.aliases: [api]`) so the proxy resolves correctly regardless of the service name `api-prod`.
+
+## CORS
+
+- **Dev**: browser calls the API directly on a different origin (5173 → 3000). CORS is enabled when `CORS_ORIGIN` is non-empty. Default for dev is `http://localhost:${WEB_PORT:-5173}`.
+- **Prod**: browser calls the same origin as the web server (8080) and nginx proxies `/api` — so no cross-origin requests occur. For prod, `CORS_ORIGIN` defaults to empty string (`""`) to disable CORS, which matches the API config (`corsEnabled = corsOrigin !== ''`). This is intentionally empty to avoid opening CORS in production when proxied on the same origin.
+
+## Resetting dev (dev only)
+
+`./infra/scripts/dev-reset.sh` destroys the development stack **and its database
+volume**. Dev and prod share the single compose project name `idea-flow`
+(Compose v2 has no per-profile project name), so the reset script cannot rely on
+the project name alone to tell them apart. Instead its guard:
+
+1. resolves the project as `idea-flow`, and
+2. renders the **dev profile** service set and requires `api`/`postgres`/`web`,
+   refusing if any prod service (`api-prod`/`postgres-prod`/`web-prod`) is
+   present.
+
+Only then does it run `docker compose -f compose.yaml --profile dev down
+--volumes`. It deliberately does **not** pass `--remove-orphans`: with a shared
+project name that flag can reach resources outside the active profile, i.e.
+prod. There is no prod reset — tearing prod down is an explicit, manual
+operation.

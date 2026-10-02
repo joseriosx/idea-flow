@@ -74,8 +74,5 @@ export const boardRoutes: FastifyPluginAsync = async (fastify) => {
   }
 
   fastify.get('/boards', listBoards)
-  fastify.get('/api/boards', listBoards)
-
   fastify.get('/boards/:id', getBoard)
-  fastify.get('/api/boards/:id', getBoard)
 }

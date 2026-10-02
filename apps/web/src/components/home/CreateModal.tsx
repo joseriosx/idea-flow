@@ -1,31 +1,44 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { uid } from '../../lib/ids'
+import { useLocalBoards } from '../../store/localBoardStore'
+
 /* ==========================================================================
    Start a new flow
 
-   The concept draws a create dialog; the app has nothing to create it with.
+   The api has no create endpoint, so this cannot be a shared project — and it
+   does not pretend otherwise. What it makes is a real board on this device:
+   an entry in `localBoardStore` with its own drawing, persisted in this browser
+   like every other board here.
 
-   The api has no create endpoint, and the canvas persists as a *single* board
-   in localStorage — the demo board, which is deliberately exempt from auto-load
-   so it is never overwritten. Adding a second local board would mean pulling the
-   demo out of the store that is its storage and threading a per-board map
-   through persistence: a change to exactly the flow the project protects. That
-   is the risky case the brief names, so it is not done.
+   That store used to hold exactly one name, because the canvas could only keep
+   one drawing. It now keeps a drawing per board, so a second board is just a
+   second entry — which is what makes this button work instead of explaining why
+   it cannot.
 
-   What is left is a dialog that does not lie. The fields are real and typeable
-   so the shape of the flow is visible, the reason is said out loud, and the
-   primary button says no instead of pretending.
+   The seed board keeps its drawing in `flowStore` and stays exempt from
+   auto-load; a board made here gets one of its own and loads it like any other.
    ========================================================================== */
 
-export function CreateModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateModal({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  /** Told when a board exists, so the home can put it in front of the reader. */
+  onCreated: () => void
+}) {
+  const create = useLocalBoards((s) => s.create)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const nameRef = useRef<HTMLInputElement>(null)
 
+  // the name is what the reader came to type, so it takes the caret
   useEffect(() => {
     if (!open) return
 
-    // the name is what the reader came to type, so it takes the caret
     const timer = setTimeout(() => nameRef.current?.focus(), 60)
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -45,6 +58,16 @@ export function CreateModal({ open, onClose }: { open: boolean; onClose: () => v
   }, [open])
 
   if (!open) return null
+
+  /** a name with nothing in it is not a name, so the button stays off */
+  const ready = name.trim() !== ''
+
+  const submit = () => {
+    if (!ready) return
+    create({ id: uid('board-'), name: name.trim(), description: description.trim(), locked: false })
+    onClose()
+    onCreated()
+  }
 
   return (
     <div
@@ -70,6 +93,12 @@ export function CreateModal({ open, onClose }: { open: boolean; onClose: () => v
             ref={nameRef}
             value={name}
             onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              // the name is what the reader came to type, so enter means "go"
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              submit()
+            }}
             placeholder="Ex.: Novo ecossistema de agentes"
           />
         </div>
@@ -84,12 +113,13 @@ export function CreateModal({ open, onClose }: { open: boolean; onClose: () => v
           />
         </div>
 
+        {/* honest about where it lands, since the api is the other kind of board */}
         <div className="hf-note">
           <span className="hf-note-dot" />
           <p>
-            <strong>Criação ainda não está ligada.</strong> A api não tem um
-            endpoint de criação, e este workspace guarda um único quadro no seu
-            dispositivo — então estes campos mostram o fluxo, mas nada é salvo.
+            Fica <strong>só neste dispositivo</strong>. A api não tem endpoint de
+            criação, então este quadro não existe para mais ninguém — e ninguém
+            mais o vê. Ele abre em branco, com o seu próprio mapa guardado aqui.
           </p>
         </div>
 
@@ -100,8 +130,9 @@ export function CreateModal({ open, onClose }: { open: boolean; onClose: () => v
           <button
             type="button"
             className="hf-btn hf-btn-black"
-            disabled
-            title="A api não tem endpoint de criação — nenhum projeto pode ser criado ainda"
+            disabled={!ready}
+            title={ready ? 'Criar neste dispositivo' : 'Dê um nome ao projeto para criar'}
+            onClick={submit}
           >
             Criar projeto
           </button>

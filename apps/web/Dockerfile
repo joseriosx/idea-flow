@@ -62,7 +62,9 @@ WORKDIR /app
 # VITE_* is inlined at build time, never read at runtime, which is exactly why
 # prod passes it as a build arg (infra/README.md).
 ARG VITE_API_URL=/api
+ARG VITE_GRAPH_PATH=
 ENV VITE_API_URL=${VITE_API_URL} \
+    VITE_GRAPH_PATH=${VITE_GRAPH_PATH} \
     NODE_ENV=production
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -80,6 +82,9 @@ FROM ${NGINX_IMAGE} AS prod
 # the contract, owned by infra: it serves /healthz for the compose healthcheck
 # and proxies /api to the api on the same origin
 COPY infra/nginx/web.conf /etc/nginx/conf.d/default.conf
+# security headers fragment, included by web.conf via an absolute path. Kept
+# OUTSIDE conf.d/ because /etc/nginx/conf.d/*.conf is auto-included into http.
+COPY infra/nginx/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # 8080 (not 80) so the image can stay unprivileged, with no

@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
 import {
   addEdge,
   applyEdgeChanges,
@@ -123,6 +122,18 @@ function markAll(): { nodes: IdeaNode[]; edges: RelationEdge[] } {
   }
 }
 
+/**
+ * The seed drawing, on its own.
+ *
+ * The canvas holds one board at a time, so the seed is not safe there by itself:
+ * opening any other board replaces it. This is the same copy `markAll` builds,
+ * handed out separately so the place that keeps a drawing per board can put the
+ * seed back where it belongs instead of whatever happened to be on screen.
+ */
+export function seedGraph(): { nodes: IdeaNode[]; edges: RelationEdge[] } {
+  return markAll()
+}
+
 /** Nothing in the store may keep a pointer to a node that is gone. */
 function pruneEdges(edges: RelationEdge[], keep: ReadonlySet<string>): RelationEdge[] {
   return edges.filter((e) => keep.has(e.source) && keep.has(e.target))
@@ -135,9 +146,165 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined
    store
    ========================================================================== */
 
-export const useFlowStore = create<FlowStore>()(
-  persist(
-    (set, get) => ({
+export const useFlowStore = create<FlowStore>()((set, get) => ({
+  ...markAll(),
+  focusedId: null,
+  edgeId: null,
+  editingId: null,
+  linkKind: 'supports',
+  seq: SEED_SEQ,
+  spawnAt: 0,
+  spawnPos: null,
+  api: API_STATE,
+  toast: null,
+
+  /* --- react flow plumbing ------------------------------------------ */
+
+  onNodesChange: (changes) =>
+    set((s) => {
+      const next = applyNodeChanges(changes, s.nodes)
+
+      // a node deleted by the keyboard or by a change also takes its
+      // relations with it, otherwise React Flow renders edges to nowhere
+      const removed = new Set(s.nodes.map((n) => n.id))
+      for (const n of next) removed.delete(n.id)
+      const edges = removed.size > 0 ? pruneEdges(s.edges, new Set(next.map((n) => n.id))) : s.edges
+
+      const editingId =
+        s.editingId && next.some((n) => n.id === s.editingId) ? s.editingId : null
+      const focusedId = s.focusedId && next.some((n) => n.id === s.focusedId) ? s.focusedId : null
+
+      return { nodes: next, edges, editingId, focusedId }
+    }),
+
+  onEdgesChange: (changes) =>
+    set((s) => ({
+      edges: applyEdgeChanges(changes, s.edges),
+      edgeId: s.edgeId && !changes.some((c) => c.type === 'remove' && c.id === s.edgeId) ? s.edgeId : null,
+    })),
+
+  connect: (connection, kind) =>
+    set((s) => {
+      const { source, target } = connection
+      if (!source || !target || source === target) return {}
+      // one relation per pair keeps the canvas honest
+      if (s.edges.some((e) => e.source === source && e.target === target)) return {}
+
+      const relation = kind ?? s.linkKind
+      const edge: RelationEdge = {
+        ...connection,
+        id: uid('e'),
+        type: EDGE_TYPE,
+        data: { kind: relation },
+        markerEnd: markerFor(relation),
+      }
+      return { edges: addEdge(edge, s.edges) }
+    }),
+
+  /* --- nodes -------------------------------------------------------- */
+
+  addNode: (kind, center) => {
+    const id = uid(kind)
+    set((s) => {
+      // a deliberate burst of keystrokes fans the cards out instead of
+      // dropping every one of them in the same spot
+      const now = performance.now()
+      const last = s.spawnPos
+      const position =
+        last !== null && now - s.spawnAt < CASCADE_MS
+          ? { x: last.x + CASCADE_STEP, y: last.y + CASCADE_STEP }
+          : center
+
+      const seq = s.seq + 1
+      const node: IdeaNode = {
+        id,
+        type: NODE_TYPE,
+        position,
+        data: { kind, title: '', note: '', seq },
+        selected: true,
+      }
+      return {
+        nodes: [...s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), node],
+        focusedId: id,
+        edgeId: null,
+        // straight into the keyboard: creating a card and naming it is one
+        // gesture, not three
+        editingId: id,
+        seq,
+        spawnAt: now,
+        spawnPos: position,
+      }
+    })
+    return id
+  },
+
+  updateNode: (id, patch) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
+    })),
+
+  removeNode: (id) =>
+    set((s) => {
+      const nodes = s.nodes.filter((n) => n.id !== id)
+      return {
+        nodes,
+        edges: pruneEdges(s.edges, new Set(nodes.map((n) => n.id))),
+        focusedId: s.focusedId === id ? null : s.focusedId,
+        editingId: s.editingId === id ? null : s.editingId,
+      }
+    }),
+
+  /* --- edges -------------------------------------------------------- */
+
+  removeEdge: (id) =>
+    set((s) => ({
+      edges: s.edges.filter((e) => e.id !== id),
+      edgeId: s.edgeId === id ? null : s.edgeId,
+    })),
+
+  setEdgeKind: (id, kind) =>
+    set((s) => ({
+      edges: s.edges.map((e) => (e.id === id ? withMarker({ ...e, data: { kind } }) : e)),
+    })),
+
+  /* --- ui ----------------------------------------------------------- */
+
+  focus: (id) => set({ focusedId: id, edgeId: null }),
+  selectEdge: (id) => set({ edgeId: id, focusedId: null }),
+  setEditing: (id) => set({ editingId: id }),
+
+  setLinkKind: (kind) => set({ linkKind: isLinkKind(kind) ? kind : 'supports' }),
+
+  setApi: (patch) => set((s) => ({ api: { ...s.api, ...patch } })),
+
+  notify: (text, tone = 'ok') => {
+    if (toastTimer) clearTimeout(toastTimer)
+    const id = (toastSeq += 1)
+    set({ toast: { id, text, tone } })
+    toastTimer = setTimeout(() => {
+      if (get().toast?.id === id) set({ toast: null })
+    }, 4200)
+  },
+
+  dismissToast: () => {
+    if (toastTimer) clearTimeout(toastTimer)
+    set({ toast: null })
+  },
+
+  /* --- wholesale ---------------------------------------------------- */
+
+  applyGraph: (graph) =>
+    set(() => ({
+      nodes: graph.nodes,
+      edges: graph.edges.map(withMarker),
+      focusedId: null,
+      edgeId: null,
+      editingId: null,
+      seq: Math.max(0, ...graph.nodes.map((n) => (Number.isFinite(n.data.seq) ? n.data.seq : 0))),
+    })),
+
+  resetDemo: () =>
+    set(() => ({
       ...markAll(),
       focusedId: null,
       edgeId: null,
@@ -146,193 +313,9 @@ export const useFlowStore = create<FlowStore>()(
       seq: SEED_SEQ,
       spawnAt: 0,
       spawnPos: null,
-      api: API_STATE,
       toast: null,
-
-      /* --- react flow plumbing ------------------------------------------ */
-
-      onNodesChange: (changes) =>
-        set((s) => {
-          const next = applyNodeChanges(changes, s.nodes)
-
-          // a node deleted by the keyboard or by a change also takes its
-          // relations with it, otherwise React Flow renders edges to nowhere
-          const removed = new Set(s.nodes.map((n) => n.id))
-          for (const n of next) removed.delete(n.id)
-          const edges = removed.size > 0 ? pruneEdges(s.edges, new Set(next.map((n) => n.id))) : s.edges
-
-          const editingId =
-            s.editingId && next.some((n) => n.id === s.editingId) ? s.editingId : null
-          const focusedId = s.focusedId && next.some((n) => n.id === s.focusedId) ? s.focusedId : null
-
-          return { nodes: next, edges, editingId, focusedId }
-        }),
-
-      onEdgesChange: (changes) =>
-        set((s) => ({
-          edges: applyEdgeChanges(changes, s.edges),
-          edgeId: s.edgeId && !changes.some((c) => c.type === 'remove' && c.id === s.edgeId) ? s.edgeId : null,
-        })),
-
-      connect: (connection, kind) =>
-        set((s) => {
-          const { source, target } = connection
-          if (!source || !target || source === target) return {}
-          // one relation per pair keeps the canvas honest
-          if (s.edges.some((e) => e.source === source && e.target === target)) return {}
-
-          const relation = kind ?? s.linkKind
-          const edge: RelationEdge = {
-            ...connection,
-            id: uid('e'),
-            type: EDGE_TYPE,
-            data: { kind: relation },
-            markerEnd: markerFor(relation),
-          }
-          return { edges: addEdge(edge, s.edges) }
-        }),
-
-      /* --- nodes -------------------------------------------------------- */
-
-      addNode: (kind, center) => {
-        const id = uid(kind)
-        set((s) => {
-          // a deliberate burst of keystrokes fans the cards out instead of
-          // dropping every one of them in the same spot
-          const now = performance.now()
-          const last = s.spawnPos
-          const position =
-            last !== null && now - s.spawnAt < CASCADE_MS
-              ? { x: last.x + CASCADE_STEP, y: last.y + CASCADE_STEP }
-              : center
-
-          const seq = s.seq + 1
-          const node: IdeaNode = {
-            id,
-            type: NODE_TYPE,
-            position,
-            data: { kind, title: '', note: '', seq },
-            selected: true,
-          }
-          return {
-            nodes: [...s.nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), node],
-            focusedId: id,
-            edgeId: null,
-            // straight into the keyboard: creating a card and naming it is one
-            // gesture, not three
-            editingId: id,
-            seq,
-            spawnAt: now,
-            spawnPos: position,
-          }
-        })
-        return id
-      },
-
-      updateNode: (id, patch) =>
-        set((s) => ({
-          nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
-        })),
-
-      removeNode: (id) =>
-        set((s) => {
-          const nodes = s.nodes.filter((n) => n.id !== id)
-          return {
-            nodes,
-            edges: pruneEdges(s.edges, new Set(nodes.map((n) => n.id))),
-            focusedId: s.focusedId === id ? null : s.focusedId,
-            editingId: s.editingId === id ? null : s.editingId,
-          }
-        }),
-
-      /* --- edges -------------------------------------------------------- */
-
-      removeEdge: (id) =>
-        set((s) => ({
-          edges: s.edges.filter((e) => e.id !== id),
-          edgeId: s.edgeId === id ? null : s.edgeId,
-        })),
-
-      setEdgeKind: (id, kind) =>
-        set((s) => ({
-          edges: s.edges.map((e) => (e.id === id ? withMarker({ ...e, data: { kind } }) : e)),
-        })),
-
-      /* --- ui ----------------------------------------------------------- */
-
-      focus: (id) => set({ focusedId: id, edgeId: null }),
-      selectEdge: (id) => set({ edgeId: id, focusedId: null }),
-      setEditing: (id) => set({ editingId: id }),
-
-      setLinkKind: (kind) => set({ linkKind: isLinkKind(kind) ? kind : 'supports' }),
-
-      setApi: (patch) => set((s) => ({ api: { ...s.api, ...patch } })),
-
-      notify: (text, tone = 'ok') => {
-        if (toastTimer) clearTimeout(toastTimer)
-        const id = (toastSeq += 1)
-        set({ toast: { id, text, tone } })
-        toastTimer = setTimeout(() => {
-          if (get().toast?.id === id) set({ toast: null })
-        }, 4200)
-      },
-
-      dismissToast: () => {
-        if (toastTimer) clearTimeout(toastTimer)
-        set({ toast: null })
-      },
-
-      /* --- wholesale ---------------------------------------------------- */
-
-      applyGraph: (graph) =>
-        set(() => ({
-          nodes: graph.nodes,
-          edges: graph.edges.map(withMarker),
-          focusedId: null,
-          edgeId: null,
-          editingId: null,
-          seq: Math.max(0, ...graph.nodes.map((n) => (Number.isFinite(n.data.seq) ? n.data.seq : 0))),
-        })),
-
-      resetDemo: () =>
-        set(() => ({
-          ...markAll(),
-          focusedId: null,
-          edgeId: null,
-          editingId: null,
-          linkKind: 'supports',
-          seq: SEED_SEQ,
-          spawnAt: 0,
-          spawnPos: null,
-          toast: null,
-        })),
-    }),
-
-    {
-      name: 'idea-flow.canvas.v1',
-      version: 1,
-      storage: createJSONStorage(() => localStorage),
-      // only the drawing is persisted; selections, toasts and api status are
-      // per session
-      partialize: (s): Partial<FlowStore> => ({
-        nodes: s.nodes,
-        edges: s.edges,
-        linkKind: s.linkKind,
-        seq: s.seq,
-      }),
-      merge: (persisted, current) => {
-        const saved = (persisted ?? {}) as Partial<FlowStore>
-        return {
-          ...current,
-          nodes: Array.isArray(saved.nodes) && saved.nodes.length > 0 ? saved.nodes : current.nodes,
-          edges: Array.isArray(saved.edges) ? saved.edges.map(withMarker) : current.edges,
-          linkKind: isLinkKind(saved.linkKind) ? saved.linkKind : current.linkKind,
-          seq: typeof saved.seq === 'number' && saved.seq >= SEED_SEQ ? saved.seq : current.seq,
-        }
-      },
-    },
-  ),
-)
+    })),
+}))
 
 /* ==========================================================================
    selectors

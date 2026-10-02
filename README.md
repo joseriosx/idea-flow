@@ -19,8 +19,8 @@ compose.yaml shared base: database, network, logging
 
 ```bash
 cp .env.example .env
-docker compose -f compose.yaml -f compose.dev.yaml up -d --build
-docker compose -f compose.yaml -f compose.dev.yaml logs -f web api
+docker compose --profile dev up -d --build
+docker compose --profile dev logs -f web api
 ```
 
 - web: <http://localhost:5173>
@@ -35,7 +35,7 @@ installs.
 
 ```bash
 cp .env.example .env.prod      # then apply the PROD ONLY block in that file
-docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml up -d --build
+docker compose --env-file .env.prod --profile prod up -d --build
 ```
 
 `web` is the only published port (`:8080`) and it reverse-proxies `/api` to the
@@ -63,13 +63,13 @@ answer `GET /health` or the stack will never be considered ready.
 
 ```bash
 # validate the compose files (what CI should run)
-docker compose -f compose.yaml -f compose.dev.yaml config -q
-docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml config -q
+docker compose --profile dev config -q
+docker compose --env-file .env.prod --profile prod config -q
 
 # logs / status / shell
-docker compose -f compose.yaml -f compose.dev.yaml logs -f web api
-docker compose -f compose.yaml -f compose.dev.yaml ps
-docker compose -f compose.yaml -f compose.dev.yaml exec api sh
+docker compose --profile dev logs -f web api
+docker compose --profile dev ps
+docker compose --profile dev exec api sh
 
 # nuke the dev stack AND its database (refuses to touch prod)
 ./infra/scripts/dev-reset.sh

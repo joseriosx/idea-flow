@@ -1,24 +1,15 @@
-# Idea Flow — base stack (shared by every environment)
-#
-# This file only declares what dev AND prod agree on: the database, the
-# network, the logging policy and shared anchors. Application services are
-# intentionally NOT defined here — they are environment specific and live in
-# compose.dev.yaml / compose.prod.yaml.
+# Idea Flow — unified compose file with dev and prod profiles
 #
 # Usage:
-#   dev :  docker compose -f compose.yaml -f compose.dev.yaml up -d
-#   prod:  docker compose -f compose.yaml -f compose.prod.yaml up -d
+#   dev:  docker compose --profile dev up -d
+#   prod: docker compose --profile prod up -d --build
+#   reset dev: ./infra/scripts/dev-reset.sh
 #
-# Project name, volumes and networks are scoped per environment by the overlay
-# (`name:`), so dev data never collides with prod data.
-
+# Project name is fixed at the top. Profiles isolate services by name.
 name: idea-flow
 
 # --------------------------------------------------------------------------
 # Anchors
-#
-# NOTE: Compose parses every file separately, so YAML anchors do NOT cross
-# file boundaries. Each overlay re-declares the anchors it needs.
 # --------------------------------------------------------------------------
 x-logging: &logging
   driver: json-file
@@ -26,11 +17,18 @@ x-logging: &logging
     max-size: "10m"
     max-file: "3"
 
+x-app-base: &app-base
+  init: true
+  networks:
+    - idea-flow
+
 # --------------------------------------------------------------------------
 # Services
 # --------------------------------------------------------------------------
 services:
+  # ========================= DEV SERVICES =========================
   postgres:
+    profiles: [dev]
     image: postgres:17-alpine
     restart: unless-stopped
     stop_grace_period: 30s
@@ -39,14 +37,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-idea_flow}
-      # checksums catch silent corruption on the data volume
       POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---data-checksums}
       TZ: ${TZ:-UTC}
       PGTZ: ${TZ:-UTC}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      # only executed the first time the data volume is initialised
+      - postgres_data_dev:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test:
         - CMD-SHELL
@@ -59,13 +57,195 @@ services:
     networks:
       - idea-flow
 
+  api:
+    profiles: [dev]
+    <<: *app-base
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    image: idea-flow-api:dev
+    restart: "no"
+    command: ["npm", "run", "dev"]
+    ports:
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-idea_flow}}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:${WEB_PORT:-5173}}
+      TZ: ${TZ:-UTC}
+      CHOKIDAR_USEPOLLING: ${WATCH_POLLING:-true}
+      WATCHPACK_POLLING: ${WATCH_POLLING:-true}
+    env_file:
+      - path: ${APP_ENV_FILE:-.env}
+        required: false
+    volumes:
+      - ./apps/api:/app
+      - api_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    logging: *logging
+
+  web:
+    profiles: [dev]
+    <<: *app-base
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: dev
+    image: idea-flow-web:dev
+    restart: "no"
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    environment:
+      NODE_ENV: development
+      TZ: ${TZ:-UTC}
+      CHOKIDAR_USEPOLLING: ${WATCH_POLLING:-true}
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+    depends_on:
+      - api
+    logging: *logging
+
+  # ========================= PROD SERVICES =========================
+  postgres-prod:
+    profiles: [prod]
+    image: postgres:17-alpine
+    restart: always
+    stop_grace_period: 30s
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-idea_flow}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:---data-checksums}
+      TZ: ${TZ:-UTC}
+      PGTZ: ${TZ:-UTC}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - log_min_duration_statement=1000
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -h 127.0.0.1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *logging
+    networks:
+      - idea-flow
+
+  api-prod:
+    profiles: [prod]
+    <<: *app-base
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: prod
+    image: ${API_IMAGE:-idea-flow/api:local}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "3000"
+    networks:
+      idea-flow:
+        aliases:
+          - api
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres-prod:5432/idea_flow}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      TZ: ${TZ:-UTC}
+    env_file:
+      - path: ${APP_ENV_FILE:-.env.prod}
+        required: false
+    depends_on:
+      postgres-prod:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *logging
+
+  web-prod:
+    profiles: [prod]
+    <<: *app-base
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    image: ${WEB_IMAGE:-idea-flow/web:local}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${PROD_WEB_PORT:-8080}:8080"
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+    depends_on:
+      api-prod:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *logging
+
 # --------------------------------------------------------------------------
 # Named volumes / networks
 # --------------------------------------------------------------------------
 volumes:
-  # scoped to the compose project, so `idea-flow-dev-*` and `idea-flow-prod-*`
-  # never share data.
-  postgres_data:
+  postgres_data_dev:
+    driver: local
+  postgres_data_prod:
+    driver: local
+  api_node_modules:
+    driver: local
+  web_node_modules:
     driver: local
 
 networks:

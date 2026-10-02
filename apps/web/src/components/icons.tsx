@@ -73,6 +73,36 @@ export const IconTrash = (p: Props) => (
   </Svg>
 )
 
+/** a pencil at 30° — the write action, as opposed to the closed padlock below */
+export const IconPencil = (p: Props) => (
+  <Svg {...p}>
+    <path d="M11.1 2.9l2 2-6.6 6.6-2.6.6.6-2.6z" />
+    <path d="M2.6 13.4h10.8" />
+  </Svg>
+)
+
+/** closed, because there is nothing on the other side of it to unlock */
+export const IconLock = (p: Props) => (
+  <Svg {...p}>
+    <path d="M3.4 7.2h9.2v6.4H3.4z" />
+    <path d="M5.6 7.2V5.4a2.4 2.4 0 0 1 4.8 0v1.8" />
+  </Svg>
+)
+
+/**
+ * The same lock, standing open. Not a smaller or simpler thing: it has to be
+ * recognisably the lock the reader just opened, one gesture away from going back,
+ * or the control that sets the lock looks like it removes it.
+ */
+export const IconUnlock = (p: Props) => (
+  <Svg {...p}>
+    <path d="M3.4 7.2h9.2v6.4H3.4z" />
+    {/* the shackle, swung to one side */}
+    <path d="M5.6 7.2V5.4a2.4 2.4 0 0 1 4.8 0" />
+    <path d="M10.4 5.4V4.2" />
+  </Svg>
+)
+
 /** a right/left arrow, sized for inline use in the inspector rows */
 export const IconArrow = ({ direction = 'right', className = 'h-3 w-3' }: Props & { direction?: 'left' | 'right' }) => (
   <svg

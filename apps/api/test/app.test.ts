@@ -43,34 +43,32 @@ describe('health', () => {
 })
 
 describe('graphs', () => {
-  for (const path of ['/graphs/demo', '/api/graphs/demo']) {
-    it(`GET ${path} returns nodes and edges`, async () => {
-      const response = await app.inject({ method: 'GET', url: path })
+  it('GET /graphs/demo returns nodes and edges', async () => {
+    const response = await app.inject({ method: 'GET', url: '/graphs/demo' })
 
-      assert.equal(response.statusCode, 200)
-      const body = response.json()
-      assert.ok(Array.isArray(body.nodes) && body.nodes.length > 0, 'expected nodes')
-      assert.ok(Array.isArray(body.edges) && body.edges.length > 0, 'expected edges')
+    assert.equal(response.statusCode, 200)
+    const body = response.json()
+    assert.ok(Array.isArray(body.nodes) && body.nodes.length > 0, 'expected nodes')
+    assert.ok(Array.isArray(body.edges) && body.edges.length > 0, 'expected edges')
 
-      // The web client drops dangling edges and crashes on a bad position, so
-      // every edge must reference a node that exists and every node must carry
-      // a numeric position.
-      const ids = new Set(body.nodes.map((node: { id: string }) => node.id))
-      for (const edge of body.edges) {
-        assert.ok(ids.has(edge.source), `edge ${edge.id} has an unknown source`)
-        assert.ok(ids.has(edge.target), `edge ${edge.id} has an unknown target`)
-        assert.notEqual(edge.source, edge.target)
-      }
-      for (const node of body.nodes) {
-        assert.equal(typeof node.position.x, 'number')
-        assert.equal(typeof node.position.y, 'number')
-        assert.ok(['idea', 'question', 'evidence'].includes(node.data.kind))
-      }
-      for (const edge of body.edges) {
-        assert.ok(['supports', 'derives'].includes(edge.data.kind))
-      }
-    })
-  }
+    // The web client drops dangling edges and crashes on a bad position, so
+    // every edge must reference a node that exists and every node must carry
+    // a numeric position.
+    const ids = new Set(body.nodes.map((node: { id: string }) => node.id))
+    for (const edge of body.edges) {
+      assert.ok(ids.has(edge.source), `edge ${edge.id} has an unknown source`)
+      assert.ok(ids.has(edge.target), `edge ${edge.id} has an unknown target`)
+      assert.notEqual(edge.source, edge.target)
+    }
+    for (const node of body.nodes) {
+      assert.equal(typeof node.position.x, 'number')
+      assert.equal(typeof node.position.y, 'number')
+      assert.ok(['idea', 'question', 'evidence'].includes(node.data.kind))
+    }
+    for (const edge of body.edges) {
+      assert.ok(['supports', 'derives'].includes(edge.data.kind))
+    }
+  })
 
   it('returns a distinct object per request', async () => {
     const first = (await app.inject({ method: 'GET', url: '/graphs/demo' })).json()
